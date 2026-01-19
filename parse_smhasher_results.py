@@ -310,7 +310,7 @@ def main():
         all_failures.extend(failures)
 
     # Output CSV
-    fieldnames = ['rounds', 'last', 'hash', 'test_family', 'test_instance', 'distribution_type', 'bitspec']
+    fieldnames = ['hash', 'rounds', 'last', 'test_family', 'test_instance', 'distribution_type', 'bitspec']
     writer = csv.DictWriter(sys.stdout, fieldnames=fieldnames)
     writer.writeheader()
     for failure in all_failures:

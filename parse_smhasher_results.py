@@ -17,8 +17,8 @@ class InvalidBitspecError(Exception):
     pass
 
 
-# Regex pattern for valid bitspec formats:
-# - 'all' (normalized from unqualified N-bit)
+# Regex pattern for valid bitspec formats (before normalization):
+# - 'N-bit' (unqualified, will be normalized to 'all')
 # - 'high N-bit' or 'low N-bit'
 # - 'high N..M bits' or 'low N..M bits'
 # - 'any N..M bits'
@@ -27,7 +27,7 @@ class InvalidBitspecError(Exception):
 # - 'key bit N' or 'seed bit N' (bitflip)
 VALID_BITSPEC_PATTERN = re.compile(
     r'^(?:'
-    r'all|'
+    r'\d+-bit|'
     r'(?:high|low)\s+\d+-bit|'
     r'(?:high|low|any)\s+\d+\.\.\d+\s+bits|'
     r'bit\s+\d+\s+->\s+out\s+\d+|'
@@ -79,7 +79,7 @@ def extract_bitspec_from_collision_line(line: str) -> str | None:
     """
     Extract bitspec from collision/distribution test lines.
     Examples:
-    - 'Testing all collisions (      64-bit)' -> '64-bit' -> 'all'
+    - 'Testing all collisions (      64-bit)' -> '64-bit'
     - 'Testing all collisions (high  32-bit)' -> 'high 32-bit'
     - 'Testing all collisions (low   32-bit)' -> 'low 32-bit'
     - 'Testing all collisions (high 16..35 bits)' -> 'high 16..35 bits'
@@ -91,8 +91,7 @@ def extract_bitspec_from_collision_line(line: str) -> str | None:
     if match:
         raw = match.group(1)
         # Normalize whitespace
-        raw = ' '.join(raw.split())
-        return normalize_bitspec(raw)
+        return ' '.join(raw.split())
     return None
 
 
@@ -131,36 +130,26 @@ def extract_bitspec_from_bitflip_line(line: str) -> str | None:
     return None
 
 
+# Bitspec extraction functions, tried in order
+BITSPEC_EXTRACTORS = [
+    extract_bitspec_from_collision_line,
+    extract_bitspec_from_avalanche_line,
+    extract_bitspec_from_bic_line,
+    extract_bitspec_from_bitflip_line,
+]
+
+
 def extract_bitspec(line: str, test_family: str) -> str:
     """
     Extract and normalize bitspec from a failure line based on test family context.
     Raises InvalidBitspecError if no recognized format is found.
     """
-    # Try collision/distribution format first (most common)
-    bitspec = extract_bitspec_from_collision_line(line)
-    if bitspec:
-        validate_bitspec(bitspec, line)
-        return bitspec
+    for extractor in BITSPEC_EXTRACTORS:
+        bitspec = extractor(line)
+        if bitspec:
+            validate_bitspec(bitspec, line)
+            return normalize_bitspec(bitspec)
 
-    # Try avalanche format
-    bitspec = extract_bitspec_from_avalanche_line(line)
-    if bitspec:
-        validate_bitspec(bitspec, line)
-        return bitspec
-
-    # Try BIC format
-    bitspec = extract_bitspec_from_bic_line(line)
-    if bitspec:
-        validate_bitspec(bitspec, line)
-        return bitspec
-
-    # Try bitflip format
-    bitspec = extract_bitspec_from_bitflip_line(line)
-    if bitspec:
-        validate_bitspec(bitspec, line)
-        return bitspec
-
-    # No format matched - raise exception
     raise InvalidBitspecError(f"Could not extract bitspec from line: {line}")
 
 

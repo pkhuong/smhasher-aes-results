@@ -17,6 +17,11 @@ class InvalidBitspecError(Exception):
     pass
 
 
+class AmbiguousBitspecError(Exception):
+    """Raised when multiple extractors return different bitspecs for the same line."""
+    pass
+
+
 # Regex pattern for valid bitspec formats (before normalization):
 # - 'N-bit' (unqualified, will be normalized to 'all')
 # - 'high N-bit' or 'low N-bit'
@@ -143,14 +148,28 @@ def extract_bitspec(line: str, test_family: str) -> str:
     """
     Extract and normalize bitspec from a failure line based on test family context.
     Raises InvalidBitspecError if no recognized format is found.
+    Raises AmbiguousBitspecError if multiple extractors return different results.
     """
+    # Run all extractors and collect results
+    results = []
     for extractor in BITSPEC_EXTRACTORS:
         bitspec = extractor(line)
         if bitspec:
             validate_bitspec(bitspec, line)
-            return normalize_bitspec(bitspec)
+            results.append((extractor.__name__, normalize_bitspec(bitspec)))
 
-    raise InvalidBitspecError(f"Could not extract bitspec from line: {line}")
+    if not results:
+        raise InvalidBitspecError(f"Could not extract bitspec from line: {line}")
+
+    # Check all normalized results are the same
+    normalized_values = set(r[1] for r in results)
+    if len(normalized_values) > 1:
+        details = ', '.join(f"{name}={value}" for name, value in results)
+        raise AmbiguousBitspecError(
+            f"Multiple extractors returned different bitspecs ({details}) for line: {line}"
+        )
+
+    return results[0][1]
 
 
 def parse_test_family(line: str) -> str | None:

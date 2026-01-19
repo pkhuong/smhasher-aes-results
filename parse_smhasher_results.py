@@ -213,6 +213,13 @@ def parse_test_instance(line: str, test_family: str) -> str | None:
     return None
 
 
+def is_differential_distribution_marker(line: str) -> bool:
+    """
+    Check if a line marks the start of differential distribution analysis.
+    """
+    return line.strip() == '---Analyzing differential distribution'
+
+
 def is_failure_line(line: str) -> bool:
     """
     Check if a line indicates a test failure.
@@ -233,6 +240,7 @@ def parse_file(filepath: Path) -> list[dict]:
     failures = []
     current_family = ''
     current_instance = ''
+    current_distribution_type = 'base'
 
     with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
         for line in f:
@@ -243,14 +251,21 @@ def parse_file(filepath: Path) -> list[dict]:
             if family:
                 current_family = family
                 current_instance = ''  # Reset instance when entering new family
+                current_distribution_type = 'base'  # Reset distribution type
                 continue
 
             # Check for test instance
             instance = parse_test_instance(line_stripped, current_family)
             if instance:
                 current_instance = instance
+                current_distribution_type = 'base'  # Reset distribution type for new instance
                 # Instance lines can also be failure lines (e.g., Avalanche tests)
                 # So don't continue here, check for failure below
+
+            # Check for differential distribution marker
+            if is_differential_distribution_marker(line_stripped):
+                current_distribution_type = 'differential'
+                continue
 
             # Check for failure
             if is_failure_line(line_stripped):
@@ -261,6 +276,7 @@ def parse_file(filepath: Path) -> list[dict]:
                     'hash': file_info['hash'],
                     'test_family': current_family,
                     'test_instance': current_instance,
+                    'distribution_type': current_distribution_type,
                     'bitspec': bitspec,
                 })
 
@@ -294,7 +310,7 @@ def main():
         all_failures.extend(failures)
 
     # Output CSV
-    fieldnames = ['rounds', 'last', 'hash', 'test_family', 'test_instance', 'bitspec']
+    fieldnames = ['rounds', 'last', 'hash', 'test_family', 'test_instance', 'distribution_type', 'bitspec']
     writer = csv.DictWriter(sys.stdout, fieldnames=fieldnames)
     writer.writeheader()
     for failure in all_failures:

@@ -12,6 +12,40 @@ import sys
 from pathlib import Path
 
 
+class InvalidBitspecError(Exception):
+    """Raised when a failure line has an unrecognized bitspec format."""
+    pass
+
+
+# Regex pattern for valid bitspec formats:
+# - 'all' (normalized from unqualified N-bit)
+# - 'high N-bit' or 'low N-bit'
+# - 'high N..M bits' or 'low N..M bits'
+# - 'any N..M bits'
+# - 'bit N -> out M' (avalanche)
+# - 'bit N -> out (M, P)' (BIC)
+# - 'key bit N' or 'seed bit N' (bitflip)
+VALID_BITSPEC_PATTERN = re.compile(
+    r'^(?:'
+    r'all|'
+    r'(?:high|low)\s+\d+-bit|'
+    r'(?:high|low|any)\s+\d+\.\.\d+\s+bits|'
+    r'bit\s+\d+\s+->\s+out\s+\d+|'
+    r'bit\s+\d+\s+->\s+out\s+\(\d+,\s*\d+\)|'
+    r'(?:key|seed)\s+bit\s+\d+'
+    r')$'
+)
+
+
+def validate_bitspec(bitspec: str, line: str) -> None:
+    """
+    Validate that bitspec matches expected format.
+    Raises InvalidBitspecError with full line if format is unrecognized.
+    """
+    if not VALID_BITSPEC_PATTERN.match(bitspec):
+        raise InvalidBitspecError(f"Unrecognized bitspec format '{bitspec}' in line: {line}")
+
+
 def parse_filename(filename: str) -> dict | None:
     """
     Parse filename to extract rounds, last, and hash function name.
@@ -84,27 +118,50 @@ def extract_bitspec_from_bic_line(line: str) -> str | None:
     return None
 
 
+def extract_bitspec_from_bitflip_line(line: str) -> str | None:
+    """
+    Extract bitspec from Keyset/Seed Bitflip test lines.
+    Examples:
+    - 'Testing 3-byte keys, ...worst is key bit   0' -> 'key bit 0'
+    - 'Testing 3-byte keys, 32-bit seeds, ...worst is seed bit   0' -> 'seed bit 0'
+    """
+    match = re.search(r'worst is (key|seed) bit\s+(\d+)', line)
+    if match:
+        return f"{match.group(1)} bit {match.group(2)}"
+    return None
+
+
 def extract_bitspec(line: str, test_family: str) -> str:
     """
     Extract and normalize bitspec from a failure line based on test family context.
+    Raises InvalidBitspecError if no recognized format is found.
     """
     # Try collision/distribution format first (most common)
     bitspec = extract_bitspec_from_collision_line(line)
     if bitspec:
+        validate_bitspec(bitspec, line)
         return bitspec
 
     # Try avalanche format
     bitspec = extract_bitspec_from_avalanche_line(line)
     if bitspec:
+        validate_bitspec(bitspec, line)
         return bitspec
 
     # Try BIC format
     bitspec = extract_bitspec_from_bic_line(line)
     if bitspec:
+        validate_bitspec(bitspec, line)
         return bitspec
 
-    # Unknown format - return empty string
-    return ''
+    # Try bitflip format
+    bitspec = extract_bitspec_from_bitflip_line(line)
+    if bitspec:
+        validate_bitspec(bitspec, line)
+        return bitspec
+
+    # No format matched - raise exception
+    raise InvalidBitspecError(f"Could not extract bitspec from line: {line}")
 
 
 def parse_test_family(line: str) -> str | None:
